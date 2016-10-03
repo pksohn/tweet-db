@@ -2,3 +2,4 @@ secrets.md
 secrets.py
 .ipynb_checkpoints
 *.pyc
+*.h5
