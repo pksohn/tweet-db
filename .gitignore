@@ -3,3 +3,5 @@ secrets.py
 .ipynb_checkpoints
 *.pyc
 *.h5
+tweets_geo.json
+tweets_1M.json
