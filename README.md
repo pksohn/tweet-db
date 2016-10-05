@@ -98,4 +98,50 @@ query = "SELECT count(*) FROM counties, tweets \
 
 cur.execute(query)
 cur.fetchall()
+---
+[(8502L,)]
+```
+
+```
+# How many Tweets fall 100 miles outside of Alameda County? (i.e., fall outside of a 100 mile polygon
+# surrounding the Alameda County).
+
+query = "SELECT count(*) FROM counties, tweets \
+        WHERE counties.geoid10='06001' \
+        AND NOT ST_Dwithin(ST_Transform(counties.geom, 3157), ST_Transform(tweets.location, 3157), 160934);"
+
+cur.execute(query)
+cur.fetchall()
+---
+[(14906L,)]
+```
+
+```
+# Get the population data for California counties directly from the Census API 
+
+c = Census(secrets.censuskey)
+
+population = c.sf1.get('P0010001', geo={'for': 'county:*',
+                                       'in': 'state:06'})
+pop = pd.DataFrame(population)
+pop.columns = ['population', 'county', 'state']
+pop['geoid10'] = pop.state + pop.county
+pop.head()
+```
+
+
+population | county | state | geoid10
+--- | --- | --- | ---
+1510271 | 001 | 06 | 06001
+1175 | 003 | 06 | 06003
+38091 | 005 | 06 | 06005
+220000 | 007 | 06 | 06007
+45578 | 009 | 06 | 06009
+
+```
+from sqlalchemy import create_engine
+enginestring = 'postgresql://{}:{}@74.207.246.217:5432/tweets'.format(user, password)
+engine = create_engine(enginestring)
+pop.to_sql('population', engine)
+conn.commit()
 ```
