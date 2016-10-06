@@ -4,6 +4,46 @@
 Civil & Environmental Engineering 263n: Scalable Spatial Analytics at UC-Berkeley, Fall 2016  
 By Yiyan Ge, Paul Sohn, Stephen Wong, Ruoying Xu, October 4, 2016*
 
+## Part 1: Tools for Spatial Analysis
+
+First, we compare the features of three programmatic tools for working with spatial data in different ways: Shapely, Fiona, and PostGIS.
+
+### Shapely
+
+Shapely is an open-source Python package that is primarily used for calculations on geospatial data, 
+and is built for dealing with specifically geospatial data tasks.
+However, most processes in Shapely can be applied to non-spatial data as well.
+The simplicity of the algorithm in Shapely allows it to generate results quicker.
+Shapely is usually applied to the following cases: 
+
+* Produce and generate geospatial data;
+* Perform spatial operations to spatial data, such as spatial join, buffer, union, intersect, etc.;
+
+### Fiona
+
+Fiona is the Python API for OGR, and is primarily aimed at processing regular data with some spatial components.
+It has the ability to deal with data with many different formats and types of files, 
+and allows users to convert them into OpenGIS Simple Features Reference Implementation (OGR) types that can be used with GDAL libraries. 
+But Fiona does not have the ability to perform spatial operations on spatial data.
+Fiona is usually applied to the following cases:
+
+* Create, process, edit data tables;
+* Project spatial data into different projection systems;
+
+### PostGIS
+
+PostGIS is an open-source database library that is used as a spatial information system.
+It can not only perform spatial operations to spatial data (although not as well as Shapely), 
+but also allows users to perform high-speed spatial queuing. 
+PostGIS is usually applied to the following cases:
+
+* Extending spatial functions (e.g. distance, area, union, and intersections) to PostgreSQL object-relational databases;
+* Calculating areas, distances, lengths and perimeters;
+* Determining topologies (i.e. the interactions of geometries);
+* Making 3D measurements;
+* Geocoding of TIGER data (a special use case);
+* Processing raster data
+
 ## Part 2: Spatial Queries
 
 For this assignment, we set up a PostgreSQL 9.3 installation with PostGIS 2.2 on a Linode server.
@@ -193,23 +233,144 @@ Santa Barbara|179.289683
 Mono|NaN
 Monterey|1594.961656
 
-County shapefile was first converted to geojson and joned with tweets_per_capita. Folium.Map is used 
-to visualize the result, which is shown below:
-![tweets_per_capita][figure1]
+County shapefile was first converted to geojson and joned with tweets_per_capita. The `folium.Map` method from the 
+Folium python package (a wrapper for Leaflet) is used to visualize the result:
 
-[figure1]:
-
-Code is attached:
 ```
 county_map = folium.Map(location=[38, -119], zoom_start=6, tiles="Mapbox Bright") 
 county_map.choropleth(geo_path=geojson,
-               data=pd.read_csv(os.path.join(os.getcwd(),'..','data','tweets_per_capita.csv')),
-               columns= ['NAME10', 'tweets_per_capita'], 
-               key_on='feature.properties.NAME10',
-               fill_color='YlGn',
-               fill_opacity=0.7,
-               line_opacity=0.2,
-               legend_name="Tweets per 1M people")
+    data=pd.read_csv(os.path.join(os.getcwd(),'..','data','tweets_per_capita.csv')),
+    columns= ['NAME10', 'tweets_per_capita'], 
+    key_on='feature.properties.NAME10',
+    fill_color='YlGn',
+    fill_opacity=0.7,
+    line_opacity=0.2,
+    legend_name="Tweets per 1M people")
 
 county_map.save('counties.html')
+```
+
+### Number of tweets per 1 million people, by county
+![tweets_per_capita](counties.png)
+
+# Part 3: MongoDB
+
+## Creating a GeoJSON File
+We begin by loading the original database and creating an array.
+
+```
+import json
+import pandas
+
+with open('tweets_1M.json','r') as f:    
+    tweets = json.load(f)  
+```
+
+For MongoDB to understand and read the file, we transform the JSON File into a GeoJSON File.
+
+```
+tweets_geojson_format3 = [{"type": "Feature", 
+                           "location": {"type": "Point", "coordinates": [d["lng"],d["lat"]]}, 
+                           "id": d["id"], "text": d["text"],
+                           "user_id": d["user_id"]} for d in tweets]
+```
+
+We save the GeoJSON file to the disk to be imported later.
+```
+with open('tweets_geojson_format3.json', 'w') as fp:
+    json.dump(tweets_geojson_format3, fp)
+```
+
+## Importing the GeoJSON File into MongoDB
+
+To import the file into MongoDB, we write the following into the command prompt:
+
+```
+mongoimport --host=127.0.0.1 --port=27017 --db database_3 --collection twitter_3 --type=json --file tweets_geojson_format3.json --jsonArray
+```
+
+At the same time, we have to ensure that MongoDB is running at the same time in a command prompt, 
+all folders have been created with the correct paths, and that the data has been stored in the correct folder with MongoDB commands.
+
+We next do some basic commands to extract the database into the Python notebook.
+```
+import pymongo
+from pymongo import MongoClient
+
+client = MongoClient()
+db = client.database_3
+```
+
+Two of the queries are spatial in nature and we create a spatial index for this purpose.
+```
+#Create a Spatial Index
+
+db.twitter_3.create_index([('location','2dsphere')])
+```
+
+## Query all Tweets from 1138308091
+
+```
+cursor = db.twitter_3.find({"user_id": 1138308091})
+for document in cursor:
+    print(document)
+```
+The query resulted in 3 tweets.  Two are shown here.    
+```
+{'user_id': 1138308091, 'text': 'According to a study at #UCBerkeley, each #tech #job in SF creates 5 nontech positions. Who am I supporting... Uber? laundry services? Food?', 'type': 'Feature', 'id': 378189982248091648, '_id': ObjectId('57f57cab01cc00c53b3bf50d'), 'location': {'coordinates': [-122.40190047, 37.78914447], 'type': 'Point'}}
+{'user_id': 1138308091, 'text': 'That moment your #shazam is #backstreetboys ...', 'type': 'Feature', 'id': 379122191872176128, '_id': ObjectId('57f57cb101cc00c53b3d9194'), 'location': {'coordinates': [-122.46826224, 37.65079252], 'type': 'Point'}}...
+```
+
+## Query 10 Tweets Nearest to 378189967014379520
+
+```
+cursor = db.twitter_3.find({"id": 378189967014379520})
+```
+```
+for document in cursor:
+    print(document)
+```
+The query resulted with a single tweet with a specific lat/long coordinate to be used for the next code cell.
+```
+{'user_id': 172710354, 'text': '@DarrenArsenal1 Alexi Lalas', 'type': 'Feature', 'id': 378189967014379520, '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
+```
+
+Note that we input the coordinates from the last response into a new query.
+```
+cursor = db.twitter_3.aggregate([
+{'$geoNear': {
+    'near': { 'type': 'Point', 'coordinates': [ -118.36353256, 34.0971366 ] },
+    'num': 10,
+    'distanceField': 'dist.calculated',
+    'spherical': True}}])
+
+for document in cursor:
+    print(document)
+```
+The query resulted in 10 tweets.  Two are shown here.
+```    
+{'user_id': 172710354, 'dist': {'calculated': 0.0}, 'text': '@DarrenArsenal1 Alexi Lalas', 'type': 'Feature', 'id': 378189967014379520, '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
+{'user_id': 135323671, 'dist': {'calculated': 7.562498675782954}, 'text': '“@nataliablanco83: Coming out soon!!!! #cwh #wellness #cousin #picoftheday @piamiller01 @ rose bay http://t.co/OG7a9mxhyp” #teamFamily 😉', 'type': 'Feature', 'id': 385990165321089024, '_id': ObjectId('57f57cdf01cc00c53b4a5a97'), 'location': {'coordinates': [-118.36360314, 34.09710197], 'type': 'Point'}}...
+```
+
+## Query all Tweets within the Polygon
+
+To query successfully, we add the polygon coordinates to the cursor first.
+```
+cursor = db.twitter_3.find({
+     'location': {
+     '$geoWithin': {
+     '$geometry': {
+     'type' : "Polygon" ,
+     'coordinates': [[[-122.412,37.810],[-122.412,37.804],[-122.403,37.806],[-122.407,37.810],[-122.412,37.810]]]}}}})
+
+for document in cursor:
+    print(document)
+```
+
+The query resulted in a large set of tweets, of which two are shown here.
+
+```    
+{'user_id': 449285514, 'text': 'Ear cuffs: yay or nay?', 'type': 'Feature', 'id': 386233772888174592, '_id': ObjectId('57f57ce001cc00c53b4ab590'), 'location': {'coordinates': [-122.40376321, 37.80616142], 'type': 'Point'}}
+{'user_id': 308850121, 'text': '@ShellieMaitre @jkg1017 thought it would be too scary!', 'type': 'Feature', 'id': 382577182763003904, '_id': ObjectId('57f57cc701cc00c53b43e730'), 'location': {'coordinates': [-122.40423985, 37.80638461], 'type': 'Point'}}...
 ```

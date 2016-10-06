@@ -5,3 +5,5 @@ secrets.py
 *.h5
 tweets_geo.json
 tweets_1M.json
+*.docx
+*.doc
