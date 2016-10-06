@@ -62,8 +62,8 @@ from sqlalchemy import create_engine
 enginestring = 'postgresql://{}:{}@74.207.246.217:5432/tweets'.format(user, password)
 engine = create_engine(enginestring)
 
-with pd.HDFStore(os.path.join(os.getcwd(), '..', 'data', 'tweets_1M.h5'), mode='r') as store:
-    df = store.tweets_subset
+with pd.HDFStore(os.path.join(os.getcwd(), '..', 'data', 'tweets_1M.h5'), mode='r') as s:
+    df = s.tweets_subset
 
 df.to_sql('tweets', engine)
 ```
@@ -116,7 +116,8 @@ Now that the tweets are loaded into PostGIS as a spatial database, we can insert
 downloaded from the Census website. 
 
 ```
-shp2pgsql -I -W 'latin1' -s 4326 tl_2010_06_county10.shp counties | psql -h 74.207.246.217 -d tweets -U paul
+shp2pgsql -I -W 'latin1' -s 4326 tl_2010_06_county10.shp counties | 
+psql -h 74.207.246.217 -d tweets -U paul
 ```
 
 We can check a few values of the FIPS codes of counties that were loaded. In addition to below,
@@ -151,7 +152,8 @@ for the purpose of distance calculation.
 ```
 query = "SELECT count(*) FROM counties, tweets \
         WHERE counties.geoid10='06001' \
-        AND NOT ST_Dwithin(ST_Transform(counties.geom, 3157), ST_Transform(tweets.location, 3157), 160934);"
+        AND NOT ST_Dwithin(ST_Transform(counties.geom, 3157), \
+        ST_Transform(tweets.location, 3157), 160934);"
 
 cur.execute(query)
 cur.fetchall()
@@ -184,8 +186,8 @@ population | county | state | geoid10
 
 ```
 from sqlalchemy import create_engine
-enginestring = 'postgresql://{}:{}@74.207.246.217:5432/tweets'.format(user, password)
-engine = create_engine(enginestring)
+eng = 'postgresql://{}:{}@74.207.246.217:5432/tweets'.format(user, pw)
+engine = create_engine(eng)
 pop.to_sql('population', engine)
 conn.commit()
 ```
@@ -202,14 +204,17 @@ county_tweets.count_tweets::float/county_pop.pop::float
 
 FROM
 
-    (SELECT counties.name10 as name, population.population as pop, counties.geom as geom 
+    (SELECT counties.name10 as name, 
+            population.population as pop,
+            counties.geom as geom 
     FROM population 
     INNER JOIN counties 
     ON counties.geoid10 = population.geoid10) county_pop
     
     INNER JOIN
 
-    (SELECT counties.name10 as name, count(*) as count_tweets 
+    (SELECT counties.name10 as name, 
+            count(*) as count_tweets 
     FROM tweets, counties
     WHERE ST_Intersects(tweets.location, counties.geom)
     GROUP BY counties.name10) county_tweets
@@ -239,7 +244,9 @@ county_tweets = pd.merge(counties, df, how='left')
 
 # Turn into tweets per 1,000,000 people for easier interpretation
 county_tweets.tweets_per_capita = county_tweets.tweets_per_capita * 1000000
-county_tweets.to_csv(os.path.join(os.getcwd(),'..','data','tweets_per_capita.csv'), index=False)
+county_tweets.to_csv(os.path.join(
+    os.getcwd(),'..','data','tweets_per_capita.csv'),
+    index=False)
 ```
 
 The following tables shows the first several records of the query results.
@@ -254,7 +261,7 @@ Mono|NaN
 Monterey|1594.961656
 
 County shapefile was first converted to geojson and joned with tweets_per_capita. The `folium.Map` method from the 
-Folium python package (a wrapper for Leaflet) is used to visualize the result:
+Folium python package (a wrapper for Leaflet) is used to visualize the result (see Figure 1 in PDF):
 
 ```
 county_map = folium.Map(location=[38, -119], zoom_start=6, tiles="Mapbox Bright") 
@@ -270,8 +277,7 @@ county_map.choropleth(geo_path=geojson,
 county_map.save('counties.html')
 ```
 
-### Number of tweets per 1 million people, by county
-![tweets_per_capita](counties.png)
+![Tweets per 1 million people, by county](counties.png)
 
 ## Part 3: MongoDB
 
@@ -293,7 +299,8 @@ For MongoDB to understand and read the file, we transform the JSON File into a G
 
 ```
 tweets_geojson_format3 = [{"type": "Feature", 
-                           "location": {"type": "Point", "coordinates": [d["lng"],d["lat"]]}, 
+                           "location": {"type": "Point", 
+                           "coordinates": [d["lng"],d["lat"]]}, 
                            "id": d["id"], "text": d["text"],
                            "user_id": d["user_id"]} for d in tweets]
 ```
@@ -309,7 +316,10 @@ with open('tweets_geojson_format3.json', 'w') as fp:
 To import the file into MongoDB, we write the following into the command prompt:
 
 ```
-mongoimport --host=127.0.0.1 --port=27017 --db database_3 --collection twitter_3 --type=json --file tweets_geojson_format3.json --jsonArray
+mongoimport --host=127.0.0.1 --port=27017 
+            --db database_3 --collection twitter_3 
+            --type=json --file tweets_geojson_format3.json 
+            --jsonArray
 ```
 
 At the same time, we have to ensure that MongoDB is running at the same time in a command prompt, 
@@ -339,8 +349,19 @@ for document in cursor:
 ```
 The query resulted in 3 tweets.  Two are shown here.    
 ```
-{'user_id': 1138308091, 'text': 'According to a study at #UCBerkeley, each #tech #job in SF creates 5 nontech positions. Who am I supporting... Uber? laundry services? Food?', 'type': 'Feature', 'id': 378189982248091648, '_id': ObjectId('57f57cab01cc00c53b3bf50d'), 'location': {'coordinates': [-122.40190047, 37.78914447], 'type': 'Point'}}
-{'user_id': 1138308091, 'text': 'That moment your #shazam is #backstreetboys ...', 'type': 'Feature', 'id': 379122191872176128, '_id': ObjectId('57f57cb101cc00c53b3d9194'), 'location': {'coordinates': [-122.46826224, 37.65079252], 'type': 'Point'}}...
+{'user_id': 1138308091, 
+ 'text': 'According to a study at #UCBerkeley, each #tech #job in SF creates 5 nontech positions. 
+          Who am I supporting... Uber? laundry services? Food?', 
+ 'type': 'Feature',
+ 'id': 378189982248091648,
+ '_id': ObjectId('57f57cab01cc00c53b3bf50d'),
+ 'location': {'coordinates': [-122.40190047, 37.78914447], 'type': 'Point'}}
+{'user_id': 1138308091, 
+ 'text': 'That moment your #shazam is #backstreetboys ...', 
+ 'type': 'Feature', 
+ 'id': 379122191872176128, 
+ '_id': ObjectId('57f57cb101cc00c53b3d9194'), 
+ 'location': {'coordinates': [-122.46826224, 37.65079252], 'type': 'Point'}}...
 ```
 
 ### Query 10 Tweets Nearest to 378189967014379520
@@ -354,7 +375,12 @@ for document in cursor:
 ```
 The query resulted with a single tweet with a specific lat/long coordinate to be used for the next code cell.
 ```
-{'user_id': 172710354, 'text': '@DarrenArsenal1 Alexi Lalas', 'type': 'Feature', 'id': 378189967014379520, '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
+{'user_id': 172710354,
+ 'text': '@DarrenArsenal1 Alexi Lalas', 
+ 'type': 'Feature', 
+ 'id': 378189967014379520, 
+ '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 
+ 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
 ```
 
 Note that we input the coordinates from the last response into a new query.
@@ -371,8 +397,20 @@ for document in cursor:
 ```
 The query resulted in 10 tweets.  Two are shown here.
 ```    
-{'user_id': 172710354, 'dist': {'calculated': 0.0}, 'text': '@DarrenArsenal1 Alexi Lalas', 'type': 'Feature', 'id': 378189967014379520, '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
-{'user_id': 135323671, 'dist': {'calculated': 7.562498675782954}, 'text': '“@nataliablanco83: Coming out soon!!!! #cwh #wellness #cousin #picoftheday @piamiller01 @ rose bay http://t.co/OG7a9mxhyp” #teamFamily 😉', 'type': 'Feature', 'id': 385990165321089024, '_id': ObjectId('57f57cdf01cc00c53b4a5a97'), 'location': {'coordinates': [-118.36360314, 34.09710197], 'type': 'Point'}}...
+{'user_id': 172710354, 
+ 'dist': {'calculated': 0.0}, 
+ 'text': '@DarrenArsenal1 Alexi Lalas', 
+ 'type': 'Feature', 
+ 'id': 378189967014379520, 
+ '_id': ObjectId('57f57cab01cc00c53b3bf50c'), 
+ 'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
+{'user_id': 135323671, 
+ 'dist': {'calculated': 7.562498675782954}, 
+ 'text': '“@nataliablanco83: Coming out soon!!!! #cwh #wellness #cousin #picoftheday @piamiller01 @ rose bay http://t.co/OG7a9mxhyp” #teamFamily', 
+ 'type': 'Feature', 
+ 'id': 385990165321089024, 
+ '_id': ObjectId('57f57cdf01cc00c53b4a5a97'), 
+ 'location': {'coordinates': [-118.36360314, 34.09710197], 'type': 'Point'}}...
 ```
 
 ### Query all Tweets within the Polygon
@@ -384,7 +422,11 @@ cursor = db.twitter_3.find({
      '$geoWithin': {
      '$geometry': {
      'type' : "Polygon" ,
-     'coordinates': [[[-122.412,37.810],[-122.412,37.804],[-122.403,37.806],[-122.407,37.810],[-122.412,37.810]]]}}}})
+     'coordinates': [[[-122.412,37.810],
+                      [-122.412,37.804],
+                      [-122.403,37.806],
+                      [-122.407,37.810],
+                      [-122.412,37.810]]]}}}})
 
 for document in cursor:
     print(document)
@@ -393,6 +435,16 @@ for document in cursor:
 The query resulted in a large set of tweets, of which two are shown here.
 
 ```    
-{'user_id': 449285514, 'text': 'Ear cuffs: yay or nay?', 'type': 'Feature', 'id': 386233772888174592, '_id': ObjectId('57f57ce001cc00c53b4ab590'), 'location': {'coordinates': [-122.40376321, 37.80616142], 'type': 'Point'}}
-{'user_id': 308850121, 'text': '@ShellieMaitre @jkg1017 thought it would be too scary!', 'type': 'Feature', 'id': 382577182763003904, '_id': ObjectId('57f57cc701cc00c53b43e730'), 'location': {'coordinates': [-122.40423985, 37.80638461], 'type': 'Point'}}...
+{'user_id': 449285514, 
+ 'text': 'Ear cuffs: yay or nay?', 
+ 'type': 'Feature', 
+ 'id': 386233772888174592, 
+ '_id': ObjectId('57f57ce001cc00c53b4ab590'), 
+ 'location': {'coordinates': [-122.40376321, 37.80616142], 'type': 'Point'}}
+{'user_id': 308850121, 
+ 'text': '@ShellieMaitre @jkg1017 thought it would be too scary!', 
+ 'type': 'Feature', 
+ 'id': 382577182763003904, 
+ '_id': ObjectId('57f57cc701cc00c53b43e730'), 
+ 'location': {'coordinates': [-122.40423985, 37.80638461], 'type': 'Point'}}...
 ```
