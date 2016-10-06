@@ -89,9 +89,11 @@ cur.fetchall()
 [('06059',), ('06103',), ('06011',), ('06083',), ('06051',)]
 ```
 
-```
-# Calculate the number of tweets inside of Contra Costa County.
+The following are demonstrations of some spatial queries. The first one gets the number of tweets inside 
+of Contra Costa County which has a FIPS code of 06013. We utilized `ST_Intersects`.
+The result shows that there are about 85000 tweets in the county of interest.
 
+```
 query = "SELECT count(*) FROM counties, tweets \
          WHERE counties.geoid10='06013' \
          AND ST_Intersects(counties.geom, tweets.location);"
@@ -101,11 +103,12 @@ cur.fetchall()
 ---
 [(8502L,)]
 ```
+The second spatial query gets the number of tweets that fall 100 miles outside 
+Alameda County (FIPS code = 06001). We utilized `ST_Dwithin` and its negation to get number of features outside the buffer.
+Depending on whether the unit of spatial reference system of the data is meter or not, `ST_Transform` may be used to convert unit to meter
+for the purpose of distance calculation.
 
 ```
-# How many Tweets fall 100 miles outside of Alameda County? (i.e., fall outside of a 100 mile polygon
-# surrounding the Alameda County).
-
 query = "SELECT count(*) FROM counties, tweets \
         WHERE counties.geoid10='06001' \
         AND NOT ST_Dwithin(ST_Transform(counties.geom, 3157), ST_Transform(tweets.location, 3157), 160934);"
@@ -115,6 +118,8 @@ cur.fetchall()
 ---
 [(14906L,)]
 ```
+
+Following is an alternative way to get population data into database.
 
 ```
 # Get the population data for California counties directly from the Census API 
@@ -128,7 +133,6 @@ pop.columns = ['population', 'county', 'state']
 pop['geoid10'] = pop.state + pop.county
 pop.head()
 ```
-
 
 population | county | state | geoid10
 --- | --- | --- | ---
@@ -144,4 +148,68 @@ enginestring = 'postgresql://{}:{}@74.207.246.217:5432/tweets'.format(user, pass
 engine = create_engine(enginestring)
 pop.to_sql('population', engine)
 conn.commit()
+```
+
+Population data is joined to counties and numbers of tweets by counties are summarized and joined to counties
+as well. Based on common county name, two tables are further joined and then tweets per capital are calculated.
+
+```
+query = """
+SELECT 
+
+county_pop.name, 
+county_tweets.count_tweets::float/county_pop.pop::float
+
+FROM
+
+    (SELECT counties.name10 as name, population.population as pop, counties.geom as geom 
+    FROM population 
+    INNER JOIN counties 
+    ON counties.geoid10 = population.geoid10) county_pop
+    
+    INNER JOIN
+
+    (SELECT counties.name10 as name, count(*) as count_tweets 
+    FROM tweets, counties
+    WHERE ST_Intersects(tweets.location, counties.geom)
+    GROUP BY counties.name10) county_tweets
+
+ON county_pop.name = county_tweets.name;
+
+"""
+
+cur.execute(query)
+result = cur.fetchall()
+```
+The following tables shows the first several records of the query results. We also added counties without tweet
+counts for visualization purpose.
+
+NAME10 | tweets_per_capita
+--- | ---
+Orange|246.492629
+Tehama|4222.933048
+Colusa|NaN
+Santa Barbara|179.289683
+Mono|NaN
+Monterey|1594.961656
+
+County shapefile was first converted to geojson and joned with tweets_per_capita. Folium.Map is used 
+to visualize the result, which is shown below:
+![tweets_per_capita][figure1]
+
+[figure1]:
+
+Code is attached:
+```
+county_map = folium.Map(location=[38, -119], zoom_start=6, tiles="Mapbox Bright") 
+county_map.choropleth(geo_path=geojson,
+               data=pd.read_csv(os.path.join(os.getcwd(),'..','data','tweets_per_capita.csv')),
+               columns= ['NAME10', 'tweets_per_capita'], 
+               key_on='feature.properties.NAME10',
+               fill_color='YlGn',
+               fill_opacity=0.7,
+               line_opacity=0.2,
+               legend_name="Tweets per 1M people")
+
+county_map.save('counties.html')
 ```
