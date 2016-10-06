@@ -221,8 +221,28 @@ ON county_pop.name = county_tweets.name;
 cur.execute(query)
 result = cur.fetchall()
 ```
-The following tables shows the first several records of the query results. We also added counties without tweet
-counts for visualization purpose.
+
+A bit of post-processing allows us to add counties with no tweets (required for Folium visualization),
+and scale the number up to tweets per one million people, for better interpretability:
+
+```
+# To visualize with Folium, we need to add counties where there are no tweets.
+# Start with getting all the counties from the database.
+query = 'SELECT NAME10 FROM counties;'
+
+cur.execute(query)
+result = cur.fetchall()
+counties = pd.DataFrame(result, columns=['NAME10'])
+
+# Merge into DataFrame
+county_tweets = pd.merge(counties, df, how='left')
+
+# Turn into tweets per 1,000,000 people for easier interpretation
+county_tweets.tweets_per_capita = county_tweets.tweets_per_capita * 1000000
+county_tweets.to_csv(os.path.join(os.getcwd(),'..','data','tweets_per_capita.csv'), index=False)
+```
+
+The following tables shows the first several records of the query results.
 
 NAME10 | tweets_per_capita
 --- | ---
@@ -253,9 +273,12 @@ county_map.save('counties.html')
 ### Number of tweets per 1 million people, by county
 ![tweets_per_capita](counties.png)
 
-# Part 3: MongoDB
+## Part 3: MongoDB
 
-## Creating a GeoJSON File
+We will also explore some of the spatial features of a MongoDB, a more recently popular NoSQL database system, 
+using pymongo as a Python wrapper.
+
+### Creating a GeoJSON File
 We begin by loading the original database and creating an array.
 
 ```
@@ -281,7 +304,7 @@ with open('tweets_geojson_format3.json', 'w') as fp:
     json.dump(tweets_geojson_format3, fp)
 ```
 
-## Importing the GeoJSON File into MongoDB
+### Importing the GeoJSON File into MongoDB
 
 To import the file into MongoDB, we write the following into the command prompt:
 
@@ -290,9 +313,8 @@ mongoimport --host=127.0.0.1 --port=27017 --db database_3 --collection twitter_3
 ```
 
 At the same time, we have to ensure that MongoDB is running at the same time in a command prompt, 
-all folders have been created with the correct paths, and that the data has been stored in the correct folder with MongoDB commands.
-
-We next do some basic commands to extract the database into the Python notebook.
+all folders have been created with the correct paths, and that the data has been stored in the correct folder with MongoDB commands. 
+We next run some basic commands to extract the database.
 ```
 import pymongo
 from pymongo import MongoClient
@@ -308,7 +330,7 @@ Two of the queries are spatial in nature and we create a spatial index for this 
 db.twitter_3.create_index([('location','2dsphere')])
 ```
 
-## Query all Tweets from 1138308091
+### Query all Tweets from 1138308091
 
 ```
 cursor = db.twitter_3.find({"user_id": 1138308091})
@@ -321,7 +343,7 @@ The query resulted in 3 tweets.  Two are shown here.
 {'user_id': 1138308091, 'text': 'That moment your #shazam is #backstreetboys ...', 'type': 'Feature', 'id': 379122191872176128, '_id': ObjectId('57f57cb101cc00c53b3d9194'), 'location': {'coordinates': [-122.46826224, 37.65079252], 'type': 'Point'}}...
 ```
 
-## Query 10 Tweets Nearest to 378189967014379520
+### Query 10 Tweets Nearest to 378189967014379520
 
 ```
 cursor = db.twitter_3.find({"id": 378189967014379520})
@@ -353,7 +375,7 @@ The query resulted in 10 tweets.  Two are shown here.
 {'user_id': 135323671, 'dist': {'calculated': 7.562498675782954}, 'text': '“@nataliablanco83: Coming out soon!!!! #cwh #wellness #cousin #picoftheday @piamiller01 @ rose bay http://t.co/OG7a9mxhyp” #teamFamily 😉', 'type': 'Feature', 'id': 385990165321089024, '_id': ObjectId('57f57cdf01cc00c53b4a5a97'), 'location': {'coordinates': [-118.36360314, 34.09710197], 'type': 'Point'}}...
 ```
 
-## Query all Tweets within the Polygon
+### Query all Tweets within the Polygon
 
 To query successfully, we add the polygon coordinates to the cursor first.
 ```
