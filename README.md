@@ -54,6 +54,8 @@ To load the Twitter data into PostGIS, we will:
 * Create a PostGIS geometry column in the new table
 * Update the geometry column using the `lat` and `lng` columns in the tweets table 
 
+### Tasks 1-3
+
 First, we will connect to the PostgreSQL database using sqlalchemy to take advantage of 
 the pandas built in "to_sql" method.
 
@@ -112,6 +114,8 @@ Column | Data Type
 --- | ---
 location | USER-DEFINED
 
+### Tasks 4 and 5
+
 Now that the tweets are loaded into PostGIS as a spatial database, we can insert the county shapefile
 downloaded from the Census website. 
 
@@ -130,6 +134,8 @@ cur.fetchall()
 [('06059',), ('06103',), ('06011',), ('06083',), ('06051',)]
 ```
 
+### Task 6
+
 The following are demonstrations of some spatial queries. The first one gets the number of tweets inside 
 of Contra Costa County which has a FIPS code of 06013. We utilized `ST_Intersects`.
 The result shows that there are about 85000 tweets in the county of interest.
@@ -144,6 +150,9 @@ cur.fetchall()
 ---
 [(8502L,)]
 ```
+
+### Task 7
+
 The second spatial query gets the number of tweets that fall 100 miles outside 
 Alameda County (FIPS code = 06001). We utilized `ST_Dwithin` and its negation to get number of features outside the buffer.
 Depending on whether the unit of spatial reference system of the data is meter or not, `ST_Transform` may be used to convert unit to meter
@@ -160,6 +169,8 @@ cur.fetchall()
 ---
 [(14906L,)]
 ```
+
+### Task 8
 
 Following is an alternative way to get population data into database.
 
@@ -191,6 +202,8 @@ engine = create_engine(eng)
 pop.to_sql('population', engine)
 conn.commit()
 ```
+
+### Task 9
 
 Population data is joined to counties and numbers of tweets by counties are summarized and joined to counties
 as well. Based on common county name, two tables are further joined and then tweets per capital are calculated.
@@ -279,6 +292,82 @@ county_map.save('counties.html')
 
 ![Tweets per 1 million people, by county](counties.png)
 
+### Task 10
+
+Finally, the last spatial query will involve finding the centroids of the DBSCAN tweet clusters from Problem 1 (10,000 Tweets). 
+Both `MiniBatchKMeans` and `DBSCAN` are used to cluster the 1 million tweets.
+```
+Mbk_Clusters = 20
+batch_size = 50
+total_clusters = 0
+all_clusters=[]
+
+# Compute clustering with MiniBatch KMeans
+mbk = MiniBatchKMeans(init='k-means++', n_clusters = Mbk_Clusters, 
+                      batch_size=batch_size, n_init=10,
+                      max_no_improvement=10, verbose=0)
+mbk.fit(sub_tweets)
+mbk_means_labels = mbk.labels_
+mbk_means_cluster_centers = mbk.cluster_centers_
+mbk_means_labels_unique = np.unique(mbk_means_labels)
+
+# Compute clustering of MiniBatch KMeans clusters with DBScan
+# read each MiniBatch KMeans cluster, store the samples in sub_cluster
+for ID_mbk in mbk_means_labels_unique:
+    sub_cluster = np.ones((0, 2))
+    for j in range(0, 100000):
+        if mbk_means_labels[j] == ID_mbk:
+            sub_cluster = np.vstack((sub_cluster, sub_tweets[j]))
+
+# Compute clustering with DBScan with MiniBatch KMeans cluster size >0
+    if sub_cluster.size >0:
+        db = DBSCAN(eps=0.1, min_samples=100).fit(sub_cluster)
+        core_samples_mask = np.zeros_like(db.labels_,
+                                         dtype=bool)
+        core_samples_mask[db.core_sample_indices_] = True
+        db_labels = db.labels_
+        db_n_clusters_ = (len(set(db_labels)) - 
+                         (1 if -1 in db_labels else 0))
+        db_labels_unique = np.unique(db_labels)
+        clusters = [sub_cluster[db_labels == i] 
+                    for i in xrange(db_n_clusters_)]
+        total_clusters = total_clusters + db_n_clusters_
+    all_clusters.extend(clusters)
+```
+
+The follow code snippet gets the minimal radii that can capture points in a cluster. A sample of records is 
+shown in the table below.
+
+```
+centroid=np.ones((total_clusters,2))
+for i in xrange(total_clusters):
+    centroid[i]=np.mean(all_clusters[i], axis=0)
+df=pd.DataFrame(index=xrange(total_clusters))
+df['id']=pd.Series().astype(int)
+df['distance']=pd.Series()
+i=0
+j=0
+for i in xrange(total_clusters):
+    df['id'][i]=i
+    df2=pd.DataFrame(index=xrange(len(all_clusters[i])))
+    df2['distance']=pd.Series()
+    for j in xrange(len(all_clusters[i])):
+        m=float(all_clusters[i][j][0]-centriod[i][0])
+        n=float(all_clusters[i][j][1]-centriod[i][1])
+        df2['distance'][j]=math.hypot(m,n)
+    df['distance'][i] = df2['distance'].max()
+result= df.sort(['distance'])
+```
+ClusterID | Distance (KM)
+:---: | :---:
+35|0.006552
+23|0.007040
+39|0.009278
+27|0.017665
+5|0.027528
+19|0.029565
+
+
 ## Part 3: MongoDB
 
 We will also explore some of the spatial features of a MongoDB, a more recently popular NoSQL database system, 
@@ -340,7 +429,7 @@ Two of the queries are spatial in nature and we create a spatial index for this 
 db.twitter_3.create_index([('location','2dsphere')])
 ```
 
-### Query all Tweets from 1138308091
+### Task 1: Query all Tweets from 1138308091
 
 ```
 cursor = db.twitter_3.find({"user_id": 1138308091})
@@ -364,7 +453,7 @@ The query resulted in 3 tweets.  Two are shown here.
  'location': {'coordinates': [-122.46826224, 37.65079252], 'type': 'Point'}}...
 ```
 
-### Query 10 Tweets Nearest to 378189967014379520
+### Task 2: Query 10 Tweets Nearest to 378189967014379520
 
 ```
 cursor = db.twitter_3.find({"id": 378189967014379520})
@@ -406,14 +495,16 @@ The query resulted in 10 tweets.  Two are shown here.
  'location': {'coordinates': [-118.36353256, 34.0971366], 'type': 'Point'}}
 {'user_id': 135323671, 
  'dist': {'calculated': 7.562498675782954}, 
- 'text': '“@nataliablanco83: Coming out soon!!!! #cwh #wellness #cousin #picoftheday @piamiller01 @ rose bay http://t.co/OG7a9mxhyp” #teamFamily', 
+ 'text': '“@nataliablanco83: Coming out soon!!!! 
+          #cwh #wellness #cousin #picoftheday @piamiller01 
+        @ rose bay http://t.co/OG7a9mxhyp” #teamFamily', 
  'type': 'Feature', 
  'id': 385990165321089024, 
  '_id': ObjectId('57f57cdf01cc00c53b4a5a97'), 
  'location': {'coordinates': [-118.36360314, 34.09710197], 'type': 'Point'}}...
 ```
 
-### Query all Tweets within the Polygon
+### Task 3: Query all Tweets within the Polygon
 
 To query successfully, we add the polygon coordinates to the cursor first.
 ```
